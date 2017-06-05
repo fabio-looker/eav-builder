@@ -1,0 +1,729 @@
+<!doctype html >
+<html>
+<head>
+<script>var version={v:"0.x",date:"2017-05-31"}</script>
+<title>LookML Builder</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.7.0/css/font-awesome.min.css" integrity="sha256-eZrrJcwDc/3uDhsdt61sL2oOBY362qM3lon1gyExkL0=" crossorigin="anonymous" />
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/foundation/5.5.3/css/foundation.min.css" integrity="sha256-NTds7atVCDeolLUzbcl45lx4gJYO+hNXCaX1wC2HQHc=" crossorigin="anonymous" />
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.1.1/jquery.min.js" integrity="sha256-hVVnYaiADRTO2PzUGmuLJr8BLUSjGIZsDYGmIJLv2b8=" crossorigin="anonymous"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/json-editor/0.7.28/jsoneditor.min.js" integrity="sha256-51+oMmpgSgS4jV5/DcGKnDHIOL6Jeie2i7ka6sPQVro=" crossorigin="anonymous"></script>
+<!--<script src="https://cdnjs.cloudflare.com/ajax/libs/nunjucks/3.0.0/nunjucks.min.js" integrity="sha256-LWvp8rf/ha5W5zb5rGjypfi/b8w5Yo0Lm+W6ccH3ejA=" crossorigin="anonymous"></script>-->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/dot/1.1.0/doT.min.js" integrity="sha256-0DJpUBhIByZ5Tm5u/xEvcRalEiuyadItx381FmBKHB4=" crossorigin="anonymous"></script>
+
+<style>
+ textarea{font-size:10pt !important;}
+ .out {width:100%;height:20em;}
+ dl.tabs.vertical>dd{overflow: hidden; text-overflow: ellipsis;max-height:4em;}
+ dl.tabs.vertical>dd>a{padding:0.5rem 0.25rem;white-space: pre-line;}
+ .tabs-content>div>h3{overflow: hidden; text-overflow: ellipsis;max-height:4em;white-space: pre-line;}
+ .wide {width:80vw;min-width:640px;margin:0 auto}
+ .narrow {max-width:640px;margin:0 auto;}
+ .d-f{display:flex}
+</style>
+<script>
+var editor;
+	// Set the JSONEditor CSS theme and icon library globally
+	JSONEditor.defaults.theme = 'foundation5';
+	JSONEditor.defaults.iconlib = 'fontawesome4';
+	$(document).ready(()=>{
+			var editorDef= {
+					schema: inputSchema,
+					startval: tryJSONParse(qs("o")) || tryJSONParse(localStorage.getItem(storageKey)) || initialValue,
+					"required_by_default":true,
+					//"disable_collapse":true,
+					"disable_properties":true,
+					"display_required_only":true,
+					"keep_oneof_values":true,
+					"disable_edit_json":true
+				}
+			editor = new JSONEditor($("#json-editor")[0],editorDef)
+			
+			editor.on('change',function() {
+					localStorage.setItem(storageKey,JSON.stringify(editor.getValue()))
+					$("#msg").hide()
+				});
+				
+				doT.templateSettings = {
+						evaluate:    /\<\<\!([\s\S]+?)\>\>/g,
+						interpolate: /\<\<\:([\s\S]+?)\>\>/g,
+						encode:      /\<\<&([\s\S]+?)\>\>/g,
+						use:         /\<\<#([\s\S]+?)\>\>/g,
+						define:      /\<\<##\s*([\w\.$]+)\s*(\:|=)([\s\S]+?)#\>\>/g,
+						conditional: /\<\<\?(\?)?\s*([\s\S]*?)\s*\>\>/g,
+						iterate:     /\<\<\*\s*(?:\>\>|([\s\S]+?)\s*\:\s*([\w$]+)\s*(?:\:\s*([\w$]+))?\s*\>\>)/g,
+						varname: 'x',
+						strip: false,
+						append: true,
+						selfcontained: false
+					};	
+			var templates={}
+			$("script[type='text/x-dot-template']").each(function(i,el){
+					var t=this.dataset;
+					templates[t.name]=doT.template($(this).text())
+					$(el.dataset.outTo||"#out").append("<h2>"+(t.label||t.name)+"</h2><textarea readonly='readonly' class='out' data-name='"+t.name+"'></textarea>")
+				})
+
+			$("#text-out").focus(function(){
+					// Highlight all on select
+					// Solution per http://stackoverflow.com/a/24589806
+					$(this).on("click.a keyup.a", function(e){
+							$(this).off("click.a keyup.a").select();
+						});
+				});
+
+
+
+			$("#build-form").on("submit",function(evt){
+					evt.preventDefault();
+					$("#msg").hide();
+					var errs=editor.validate();
+					if(errs.length){
+							$("#msg")
+							.text(errs.map(e=>e.path+": "+e.message).join("\n"))
+							.show()
+							return;
+						}
+					var editorValue=editor.getValue()
+					console.log("Editor", editorValue)
+					var input=customTransform(editorValue)
+					console.log("transformed", input)
+					$(".out").each(function(i,el){
+							try{
+									$(this).val(templates[this.dataset.name](input).replace(/\n\s*\n/g,"\n"))
+								}catch(e){
+									console.error(e)
+								}
+						})
+				})
+		})
+	
+	//Just functions below
+
+	function set(obj,path,val){
+			if(path.split){path=path.split('/')}
+			var head=path[0];
+			if(path.length==1){
+					obj[head]=val
+				}else{
+					obj[head]=obj[head]||{};
+					set(obj[head],path.slice(1),val)
+				}
+			return obj;
+		}
+	function get(obj,path){
+			if(path.split){path=path.split('/')}
+			var head=path[0];
+			if(path.length==1){
+					return obj && obj[head];
+				}else{
+					return get(obj[head],path.slice(1))
+				}
+		}
+	function unique(x,i,a){return a.indexOf(x)===i}
+	function not(f){return function(...argArr){return !f(...argArr)}}
+	function flatten(a,b){return a.concat(b)}
+	function truthy(x){return !!x}
+	function objByOf(byKeys,ofKey){
+			byKeys=(byKeys instanceof Array ? byKeys : [byKeys])
+			return function(accum,x,i){
+					return set(accum,byKeys.map(k=>get(x,k)),ofKey?get(x,ofKey):x)
+				}
+		}
+	function sorter(path){
+			return function(a,b){
+					return get(a,path)-get(b,path)
+				}
+		}
+	function tryJSONParse(s){
+			try{
+					return JSON.parse(s)
+				}catch(e){
+					return undefined
+				}
+		}
+	function qs(k){
+			return document.location.search.slice(1).split("&")
+			.filter(function(p){return p.indexOf(encodeURIComponent(k)+"=")===0})
+			.map(function(p){return decodeURIComponent(p.split("=").slice(1).join("="))})[0]
+		}
+</script>
+</head>
+<body>
+	<h1>LookML Builder</h2>
+	<div>
+		<div id="build-panel" style="width:80vw;min-width:640px;margin:0 auto">
+			<form id="build-form">
+				<div id="json-editor"></div>
+				<div id="msg" style="white-space:pre-line;color:#333;background-color:#DDB"></div>
+				<div style="text-align:right">
+					<div  style="display:inline-block;vertical-align:top;margin: 0 2em;">
+						<input type="submit" style="margin-left:auto;margin-right:auto;border:solid 1px black" value="Go" class="button" />
+					</div>
+				</div>
+			</form>
+		</div>
+		<div class="narrow">
+			<h2>Tips</h2>
+			<ul style="font-size:0.8em; font-family:serif; color:#333;">
+				<li> This is a static HTML file and can be used locally. If you are running it from a shared domain, other scripts on that domain may have access to data you enter here.</li>
+			</ul>
+		</div>	
+		<div class="wide">
+			<div style="width:80vw;min-width:640px;margin:0 auto">
+				<h2>Built Model (step 1)</h2>
+				<div id="out1"></div>
+			</div>
+		</div>
+		<form id="api-form">
+		<div class="wide d-f">
+			<div>
+				Hostname:<br />
+				<input id="api-host" />
+			</div>
+			<div>
+				Model:<br />
+				<input id="api-model" />
+			</div>
+			<div>
+				API Key:<br />
+				<input id="api-key" />
+			</div>
+			<div>
+				API Secret:<br />
+				<input id="api-secret" type="password"/>
+			</div>
+			<div>
+				<input type="submit" value="Go" id="api-submit" />
+			</div>
+		</div>
+		</form>
+		<div class="wide">
+			<textarea id="api-out" readonly="readonly"></textarea>
+		</div>
+		<div class="wide">
+			<h2>Built Model (step 2)</h2>
+			<div id="out"></div>
+		</div>
+	</div>
+</body>
+<script>
+	$("#api-form").on("submit",function(evt){
+			evt.preventDefault();
+			var host=$("#api-host").val()
+			var hostname=host+(host.indexOf(":")<0?":19999":"")
+			var model=$("#api-model").val()
+			var key=$("#api-key").val()
+			var secret=$("#api-secret").val()
+			if(!host || !model || !key || !secret){alert("All valued are required");return}
+			try{
+					var x=customTransform(editor.getValue())
+					var filters={};
+					filters[x.statView.lName+".is_populated"]='true'
+				}catch(e){alert("Missing editor value. "+e.getMessage())}
+			Promise.resolve()
+			.then(()=>$("#api-out").val("Fetching..."))
+			.then(()=>$.post("http://localhost:1337/"+hostname+"/login",{
+					client_id:key,
+					client_secret:secret,
+				}))
+			.then(auth=>((verb,method,data)=>$.ajax({
+					method: verb,
+					url:"http://localhost:1337/"+hostname+"/api/3.0/"+method,
+					data:verb=="POST"?JSON.stringify(data):data,
+					headers:{"Authorization":"token "+auth.access_token}
+				})))
+			.then(api=>
+					api("POST","queries/run/json",{
+							model:model,
+							view:x.statView.lName,
+							fields:(
+									x.oView
+									?[
+										x.oView.lName+'.id_string',
+										x.oView.lName+'.name',
+										]
+									:[])
+								.concat([x.attribute.lName+'.id_string',
+									x.attribute.lName+'.name',
+									x.colsView.lName+'.value_column',
+									x.statView.lName+'.cardinality'
+								]),
+							filters:filters,
+							limit:10000
+						})
+				)
+			.then(results=>({
+					access: (x.oView
+							?Object.entries(results.reduce(objByOf(x.oView.lName+'.id_string',x.oView.lName+'.name'),{}))
+							.map(a=>({ownerId:a[0],ownerName:a[1]||lookmlName(a[0])}))
+							:[]),
+					attributes:results.map((row,r)=>({
+							oId:row[x.oView.lName+'.id_string']||undefined,
+							aId:row[x.attribute.lName+'.id_string'],
+							vNum:row[x.colsView.lName+'.value_column'],
+							lName:lookmlName(row[x.attribute.lName+'.name'])+"_"+r,
+							viewLabel:x.attribute.label,
+							fieldLabel:row[x.attribute.lName+'.name'],
+							cardinality:row[x.statView.lName+'.cardinality']
+						}))
+				}))
+			.then(out=>$("#api-out").val(JSON.stringify(out,undefined,2).slice(1,-1)))
+			.catch(err=>{
+					$("#api-out").val(
+						"An error ocurred: "
+						+(err && err.message || err)
+						+"\n\nDid you?...\n > npm install -g corsproxy-https\n > corsproxy")
+				})
+		})
+</script>
+<script>
+	var storageKey="json-eav"
+	var pat={
+			sql:"^[^;]+(;[^;]+)*$",
+			sqlOrNone:"^[^;]*(;[^;]+)*$",
+			oneLineString:"^[^\"\\n]+$",
+			oneLineStringOrNone:"^[^\"\\n]*$",
+			multiLineStringPattern:"^[^\"]+$",
+			atom:"^[a-zA-Z0-9_]+$",
+			atomOrNone:"^[a-zA-Z0-9_]*$"
+		}
+	var inputSchema={
+			type:"object",
+			title:"Builder Inputs",
+			options:{"disable_edit_json":false,"disable_collapse":true,"disable_properties":false},
+			properties:{
+					dialect:{type:"string",title:"Dialect",enum:["redshift"]},
+					entity:{
+							type:"object",
+							title:"Entity Table",
+							properties:{
+									label:{type:"string",title:"Entity Label"},
+									lName:{type:"string",title:"LookML Name",pattern:pat.atom},
+									sTable:{type:"string",title:"SQL Table Expression",pattern:pat.sql},
+									eCol:{type:"string",title:"ID/entityID Column",pattern:pat.atom},
+									oCol:{type:"string",title:"Owner column",pattern:pat.atomOrNone}
+								}
+						},
+					attribute:{
+							type: "object",
+							title:"Attribute Table",
+							properties:{
+									label:{type:"string",title:"Attribute Label"},
+									lName:{type:"string",title:"LookML Name",pattern:pat.atom},
+									sTable:{type:"string",title:"SQL Table Expression",pattern:pat.sql},
+									aCol:{type:"string",title:"ID/attributeID Column",pattern:pat.atom},
+									nCol:{type:"string",title:"Attribute Name Column",pattern:pat.atom},
+									oCol:{type:"string",title:"OwnerID Column",pattern:pat.atomOrNone}
+								}
+						},
+					eav:{
+						type: "object",
+						title: "EAV Table",
+						properties:{
+								//lName:{type:"string",title:"LookML Name"},
+								sTable:{ype:"string",title:"SQL Table Expression",pattern:pat.sql},
+								eCol:{type:"string","title":"Entity Column",pattern:pat.atom},
+								aCol:{type:"string","title":"Attribute Column",pattern:pat.atom},
+								values:{type:"array",format:"table",title:"Values",
+										items:{
+												type:"object",
+												properties:{
+														vCol: {type:"string", title:"Value Column"}
+													}
+											}
+									}
+							}
+					},
+					oView:{
+							type: "object",
+							title:"Entity Owners View",
+							options:{collapsed:true},
+							properties:{
+									lName:{type:"string",title:"LookML Name",pattern:pat.atomOrNone},
+									sTable:{ype:"string",title:"SQL Table Expression",pattern:pat.sqlOrNone},
+									oCol:{type:"string",title:"OwnerID Column",pattern:pat.atomOrNone},
+									nCol:{type:"string",title:"Owner Name Column",pattern:pat.atomOrNone},
+								}
+						},
+					access:{
+						type:"array",
+						title:"Access Data",
+						format:"table",
+						options:{collapsed:true},
+						items:{
+								type:"object",
+								properties:{
+										ownerId:{type:"string",title:"Owner ID", pattern:pat.oneLineStringOrNone},
+										ownerName:{type:"string",title:"LookML Name",pattern:pat.oneLineStringOrNones}
+									}
+							}
+					},
+					attributes:{
+							type:"array",
+							title:"Attribute Data",
+							format:"tabs",
+							options:{collapsed:true},
+							items:{
+									type:"object",
+									title:"Attribute",
+									headerTemplate:"{{self.lookmlName}}",
+									options:{disable_collapse:true},
+									properties:{
+											oId:{type:"string",title:"Owner ID", pattern:pat.oneLineStringOrNone},
+											aId:{type:"number",title:"Attribute ID", pattern:pat.oneLineString},
+											vNum:{
+												type:"string",
+												watch:{vCols:"eav.values"},
+												enumSource:[{source:"vCols",title:"{{item.vCol}}",value:"v{{i}}"}]
+											},
+											lName:{type:"string",title:"LookML Name/Main Field", pattern:pat.atom},
+											viewLabel:{type:"string",title:"View Label",required:false},
+											fieldLabel:{type:"string",title:"Field Label"},
+											cardinality:{type:"string",title:"Cardinality",enum:["one_to_one","one_to_many"]}
+										}
+								}
+						}
+				}
+		}
+
+	var initialValue={}
+	function customTransform (x){return Object.assign({},x,{
+			generator:version,
+			access:x.access.length?x.access:[{ownerId:false,lName:"unrestricted"}],
+			eav:Object.assign({},x.eav,{
+				lName:x.entity.lName+"_"+x.attribute.lName+"_eav"
+			}),
+			statView:{
+				lName:x.entity.lName+"_"+x.attribute.lName+"_stats"
+			},
+			colsView:{
+				lName:x.entity.lName+"_"+x.attribute.lName+"_value_columns"
+			},
+			oView:(x.entity.oCol || x.attribute.oCol)&&Object.assign({},x.oView,{
+				lName:x.entity.lName+"_"+x.oView.lName
+			})
+		})};
+	function lookmlName(s){
+			if(!s || !s.trim || !s.trim()){throw "Non-empty string required for LookML name";}
+			return s.replace(/[\s]+/g,"_").replace(/[^a-zA-Z0-9_]+/g,"").toLowerCase()
+		};	
+
+</script>
+<script type="text/x-dot-template" data-name="pre-attributes-data" data-out-to="#out1">
+	#######################################################################
+	# eav._<<:x.statView.lName>>.view.lkml 
+	#######################################################################
+	# Warning:  This file is programatically generated (Your changes will be overwritten)
+	# EAV Generator by Fabio http://rawgit.com/fabio-looker/eav-builder/master/index.html
+	# Generator v<<:x.generator.v>> (<<:x.generator.date>>)
+	# Generated on <<:(new Date()).toISOString().slice(0,10)>>
+	#
+	explore: <<:x.statView.lName>> {
+		# This lets us pull attribute metadata to easily fill out the rest of the form
+		hidden: yes
+		join: <<:x.colsView.lName>> {
+			type:left_outer
+			relationship: one_to_one #Really one_to_many, but dont want SymAggs
+			sql_on: 1=1 ;;
+		}
+		join: <<:x.attribute.lName>> {
+			type: left_outer
+			relationship: one_to_one #Really one_to_many, but dont want SymAggs
+			sql_on: ${<<:x.attribute.lName>>.id} = ${<<:x.statView.lName>>.attribute_id}  ;;
+		}
+		<<?x.oView>>
+		<<?x.attribute.oCol>>
+		join: <<:x.oView.lName>> {
+			type: left_outer
+			relationship: one_to_one
+			sql_on: ${<<:x.oView.lName>>.id} = ${<<:x.attribute.lName>>.owner_id};;
+		}
+		<<??>>
+		join: <<:x.entity.lName>> {
+			type: left_outer
+			relationship: one_to_one
+			sql_on: ${<<:x.entity.lName>>.id}=${<<:x.entity.lName>>.id}=;;		
+		}
+		join: <<:x.oView.lName>> {
+			type: left_outer
+			relationship: one_to_one
+			sql_on: ${<<:x.oView.lName>>.id} = ${<<:x.entity.lName>>.owner_id};;
+		}
+		<<?>>
+		<<?>>
+	}
+	#This may already exist in your model, so you may want to add a prefix in the generator form
+	view: <<:x.entity.lName>> {
+		label: "<<:x.entity.label>>"
+		dimension: id {
+			hidden: yes
+			primary_key: yes
+			sql: ${TABLE}.<<:x.entity.eCol>>;;
+		}
+		dimension: id_string {
+			hidden: yes
+			type: string
+			sql: CAST(${TABLE}.<<:x.entity.eCol>> AS varchar);;
+		}
+		dimension: name {
+			primary_key: yes
+			sql: ${TABLE}.<<:x.entity.nCol>>;;
+		}
+		dimension: owner_id {
+			alias:[<<:x.oView.lName>>_id]
+			hidden: yes
+			sql: <<?x.entity.oCol>>${TABLE}.<<:x.entity.oCol>><<??>>NULL<<?>>;;
+		}
+	}
+	
+	
+	view: <<:x.attribute.lName>> {
+		sql_table_name: <<:x.attribute.sTable>>;;
+		dimension: id {
+				label: "<<:x.attribute.label>> ID"
+				primary_key: yes
+				sql: ${TABLE}.<<:x.attribute.aCol>>;;
+			}
+		dimension: id_string {
+				#Large numbers are not handled well by JSON.parse
+				hidden: yes
+				type:string
+				sql: CAST( ${TABLE}.<<:x.attribute.aCol>> AS varchar);;
+			}
+		dimension: name {
+			label: "<<:x.attribute.label>> Name"
+			sql: <<? x.attribute.nCol >>${TABLE}.<<:x.attribute.nCol>><<??>>${id_string}<<?>>;;
+		}
+		<<?x.attribute.oCol>>
+		dimension: owner_id {
+			alias: [<<:x.oView.lName>>_id]
+			hidden: yes
+			sql: ${TABLE}.<<:x.attribute.oCol>>;;
+		}
+		<<?>>
+	}
+	
+
+	view: <<:x.eav.lName>> {
+		sql_table_name: <<:x.eav.sTable>>;;
+		dimension: entity_id {
+			alias: [<<:x.entity.lName>>_id]
+			hidden: yes
+			sql: ${TABLE}.<<:x.eav.eCol>>;;
+		}
+		dimension: attribute_id {
+			alias: [<<:x.attribute.lName>>_id]
+			hidden: yes
+			sql: ${TABLE}.<<:x.eav.aCol>>;;
+		}
+		<<* x.eav.values :value:v>>
+		dimension: v<<:v>> {
+			hidden:yes
+			sql: ${TABLE}.<<:value.vCol>>;;
+		}
+		<<*>>
+	}
+	
+	
+	<<?x.oView>>
+	view: <<:x.oView.lName>> {
+		sql_table_name: <<:x.oView.sTable>> ;;
+		dimension: id{
+			hidden: yes
+			primary_key: yes
+			sql: ${TABLE}.<<:x.oView.oCol>>;;
+			
+		}
+		dimension: id_string{
+			hidden: yes
+			type: string
+			sql: CAST(${TABLE}.<<:x.oView.oCol>> AS varchar);;
+		}
+		dimension: name{
+			label: "Owner"
+			view_label: <<?x.attribute.oCol>>"<<:x.attribute.label>>"<<??>>"<<:x.entity.label>>"<<?>>
+			type: string
+			sql: ${TABLE}.<<:x.oView.nCol>>;;
+		}
+	}	
+	<<?>>
+	
+	
+	view: <<:x.colsView.lName>> {
+		sql_table_name: (
+				<<* x.eav.values :value:v>>
+				<<?v!=0>>UNION ALL<<?>>
+				SELECT 'v<<:v>>' as vcol
+				<<*>>
+			)
+		;;
+		dimension: value_column {
+			type: string
+			sql: ${TABLE}.vcol ;;
+		}
+	}
+	
+	
+	view: <<:x.statView.lName>> {
+		extends:[<<:x.eav.lName>>]
+		label: "EAV Table Stats"
+		measure: eav_count{
+			label: "Count of records"
+			type: count
+		}
+		measure: distinct_e_count {
+			#For each a, if count(*) > count(distinct e) then one-to-many
+			label: "Count of distict entities"
+			type: count_distinct
+			sql: ${TABLE}.<<:x.eav.eCol>>;;
+		}
+		measure: cardinality {
+			type: string
+			sql: CASE WHEN ${eav_count} > ${distinct_e_count} THEN 'one_to_many' ELSE 'one_to_one' END;;
+		}
+		measure: is_populated {
+			type: string
+			label: "Is value column populated?"
+			required_fields: [<<:x.colsView.lName>>.value_column]
+			sql: CASE<<* x.eav.values :value:v>>
+					 WHEN ${<<:x.colsView.lName>>.value_column}='v<<:v>>'
+					 THEN CASE 
+					 		WHEN COUNT(${TABLE}.<<:value.vCol>>)>0
+					 		THEN 'true'
+					 		ELSE 'false'
+							END
+					<<*>>
+			END;;
+		}
+	}	
+</script>
+
+<script type="text/x-dot-template" data-name="one-per-model-explore-files">
+	<<! let dialect={
+			redshift:{listAgg:'LISTAGG',concat:'||'}
+		}[x.dialect];
+	>>
+	
+	<<* x.access :owner:o>>
+	#############################################################################################
+	##
+	##  eav.<<:lookmlName(owner.ownerName)>>.<<:x.entity.lName>>.view.lkml 
+	##
+	##  Should be included into model for: owner.ownerName
+	##
+	#############################################################################################
+	##
+	##  Warning:  This file is programatically generated (Your changes will be overwritten)
+	##  EAV Generator by Fabio http://rawgit.com/fabio-looker/eav-builder/master/index.html
+	##  Generator v<<:x.generator.v>> (<<:x.generator.date>>)
+	##  Generated on <<:(new Date()).toISOString().slice(0,10)>>
+	##
+	#############################################################################################
+
+	include: "eav._attributes.view.lkml" 
+
+	explore: <<:x.entity.lName>> {
+		<<? owner.ownerId >>
+		sql_always_where: ${<<:x.entity.lName>>.owner_id} = <<:owner.owner_id>>;;
+		<<?>>
+		
+		# Any other joins you may want can come before or after your EAV joins
+		<<* x.attributes :attribute:a >>
+			<<! let joinName=attribute.lName+"_"+(attribute.cardinality=="one_to_one"?"direct":"aggregates"); >>
+			join: <<:joinName>> {
+				relationship: one_to_one
+				view_label: "<<:attribute.viewLabel>>"
+				sql_on:
+					${<<:x.entity.lName>>.id} =
+					${<<:joinName>>.entity_id}
+				AND 
+					${<<:joinName>>.attribute} =
+					${<<:joinName>>.specific_attribute}
+				;;
+			}
+		<<*>>
+	}
+	<<*>>
+</script>
+	
+	
+<script type="text/x-dot-template" data-name="shared-attributes-views-file">
+	#######################################################################
+	# eav._attributes.view.lkml 
+	#######################################################################
+	# Warning:  This file is programatically generated (Your changes will be overwritten)
+	# EAV Generator by Fabio http://rawgit.com/fabio-looker/eav-builder/master/index.html
+	# Generator v<<:x.generator.v>> (<<:x.generator.date>>)
+	# Generated on <<:(new Date()).toISOString().slice(0,10)>>
+	#	
+	view: <<:x.eav.lName>>_base {
+		#Base view for all one_to_one and one_to_many EAV joins
+		extension:required
+
+		dimension: entity_id {
+			hidden: yes
+			sql: ${TABLE}.<<:x.eav.eCol>> ;;
+		}
+		dimension: attribute {
+			hidden: yes
+			sql: ${TABLE}.<<:x.eav.aCol>> ;;
+		}
+	}
+
+	<<* x.attribute.values :value:v>>
+	view: <<:x.eav.lName>>_v<<:v>>_direct {
+		extends: [<<:x.eav.lName>>_base]
+		extension:required
+		sql_table_name: <<:x.attribute.sName>> ;;
+		dimension: value {
+			hidden: yes
+			type: string
+			sql: ${TABLE}.<<:value.vCol>> ;;
+		}
+	}
+	view: <<:x.eav.lName>>_v<<:v>>_aggregates {
+		extends: [<<:x.eav.lName>>_base]
+		extension: required
+		sql_table_name: (
+			SELECT <<:x.eav.eCol>>, <<:x.eav.aCol>>, <<:dialect.listAgg>>(${value}) as value_list, COUNT(${value}) as value_count
+			FROM <<:x.eav.sTable>>
+			GROUP BY 1,2
+			)
+		;;
+		#dimension: id {
+		#	hidden:  yes
+		#	primary_key: yes
+		#	type: string
+		#	sql: CONCAT(${TABLE}.case_id, '|' , ${TABLE}.attribute);;
+		#}
+		dimension: value_list {
+			hidden:  yes
+			type: string
+			sql: ${TABLE}.value_list ;;
+		}
+		dimension: value_count {
+			hidden:  yes
+			type: number
+			sql: ${TABLE}.value_count ;;
+		}
+	}
+	<<*>>
+
+	<<*x.attributes :attribute:a >>
+	<<! let base=(attribute.cardinality=="one_to_one"?"direct":"aggregates"); >>
+	view: <<:attribute.lName>>_<<:base>> {
+		extends: [<<:x.eav.lName>>_<<:attribute.vNum>>_<<:base>>]
+		dimension: specific_attribute {
+			hidden:yes
+			sql: <<:attribute.attributeId>>;;
+		}
+		dimension: attribute_value {
+			label: "<<:attribute.fieldLabel>>"
+			view_label: "<<:attribute.viewLabel>>"
+			#type: Could be added
+			sql: ${value};;
+		}
+	}
+	<<*>>
+</script>
+</html>
