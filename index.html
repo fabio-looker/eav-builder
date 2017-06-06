@@ -60,7 +60,7 @@ var editor;
 			$("script[type='text/x-dot-template']").each(function(i,el){
 					var t=this.dataset;
 					templates[t.name]=doT.template($(this).text())
-					$(el.dataset.outTo||"#out").append("<h2>"+(t.label||t.name)+"</h2><textarea readonly='readonly' class='out' data-name='"+t.name+"'></textarea>")
+					$(el.dataset.outTo||"#out").append("<h3>"+(t.label||t.name)+"</h3><textarea readonly='readonly' class='out' data-name='"+t.name+"'></textarea>")
 				})
 
 			$("#text-out").focus(function(){
@@ -170,10 +170,11 @@ var editor;
 		</div>	
 		<div class="wide">
 			<div style="width:80vw;min-width:640px;margin:0 auto">
-				<h2>Built Model (step 1)</h2>
+				<h2>Step 1) Build metadata explore</h2>
 				<div id="out1"></div>
 			</div>
 		</div>
+		<h2>Step 2) Pull attribute data from metadata explore</h2>
 		<form id="api-form">
 		<div class="wide d-f">
 			<div>
@@ -201,7 +202,7 @@ var editor;
 			<textarea id="api-out" readonly="readonly"></textarea>
 		</div>
 		<div class="wide">
-			<h2>Built Model (step 2)</h2>
+			<h2>Step 3) Build full model(s)</h2>
 			<div id="out"></div>
 		</div>
 	</div>
@@ -216,7 +217,8 @@ var editor;
 			var secret=$("#api-secret").val()
 			if(!host || !model || !key || !secret){alert("All valued are required");return}
 			try{
-					var x=customTransform(editor.getValue())
+					var editorValue=editor.getValue()
+					var x=customTransform(editorValue)
 					var filters={};
 					filters[x.statView.lName+".is_populated"]='true'
 				}catch(e){alert("Missing editor value. "+e.getMessage())}
@@ -255,19 +257,20 @@ var editor;
 			.then(results=>({
 					access: (x.oView
 							?Object.entries(results.reduce(objByOf(x.oView.lName+'.id_string',x.oView.lName+'.name'),{}))
+							.filter(a=>a[0])
 							.map(a=>({ownerId:a[0],ownerName:a[1]||lookmlName(a[0])}))
 							:[]),
 					attributes:results.map((row,r)=>({
 							oId:row[x.oView.lName+'.id_string']||undefined,
 							aId:row[x.attribute.lName+'.id_string'],
 							vNum:row[x.colsView.lName+'.value_column'],
-							lName:lookmlName(row[x.attribute.lName+'.name'])+"_"+r,
+							lName:lookmlName(row[x.attribute.lName+'.name']+"_"+r),
 							viewLabel:x.attribute.label,
 							fieldLabel:row[x.attribute.lName+'.name'],
 							cardinality:row[x.statView.lName+'.cardinality']
 						}))
 				}))
-			.then(out=>$("#api-out").val(JSON.stringify(out,undefined,2).slice(1,-1)))
+			.then(out=>$("#api-out").val(JSON.stringify(Object.assign({},editorValue,out),undefined,2)))
 			.catch(err=>{
 					$("#api-out").val(
 						"An error ocurred: "
@@ -285,7 +288,8 @@ var editor;
 			oneLineStringOrNone:"^[^\"\\n]*$",
 			multiLineStringPattern:"^[^\"]+$",
 			atom:"^[a-zA-Z0-9_]+$",
-			atomOrNone:"^[a-zA-Z0-9_]*$"
+			atomOrNone:"^[a-zA-Z0-9_]*$",
+			digits:"^\d+$"
 		}
 	var inputSchema={
 			type:"object",
@@ -293,6 +297,7 @@ var editor;
 			options:{"disable_edit_json":false,"disable_collapse":true,"disable_properties":false},
 			properties:{
 					dialect:{type:"string",title:"Dialect",enum:["redshift"]},
+					namespace:{type:"string",title:"LookML namespace",pattern:pat.atomOrNone},
 					entity:{
 							type:"object",
 							title:"Entity Table",
@@ -366,7 +371,7 @@ var editor;
 							items:{
 									type:"object",
 									title:"Attribute",
-									headerTemplate:"{{self.lookmlName}}",
+									headerTemplate:"{{self.lName}}",
 									options:{disable_collapse:true},
 									properties:{
 											oId:{type:"string",title:"Owner ID", pattern:pat.oneLineStringOrNone},
@@ -390,17 +395,23 @@ var editor;
 	function customTransform (x){return Object.assign({},x,{
 			generator:version,
 			access:x.access.length?x.access:[{ownerId:false,lName:"unrestricted"}],
+			entity:Object.assign({},x.entity,{
+				lName:x.namespace+(x.namespace?"__":"")+"entities"
+			}),
+			attribute:Object.assign({},x.attribute,{
+				lName:x.namespace+(x.namespace?"__":"")+"attributes"
+			}),
 			eav:Object.assign({},x.eav,{
-				lName:x.entity.lName+"_"+x.attribute.lName+"_eav"
+				lName:x.namespace+(x.namespace?"__":"")+"values"
 			}),
 			statView:{
-				lName:x.entity.lName+"_"+x.attribute.lName+"_stats"
+				lName:x.namespace+(x.namespace?"__":"")+"eav_stats"
 			},
 			colsView:{
-				lName:x.entity.lName+"_"+x.attribute.lName+"_value_columns"
+				lName:x.namespace+(x.namespace?"__":"")+"value_columns"
 			},
 			oView:(x.entity.oCol || x.attribute.oCol)&&Object.assign({},x.oView,{
-				lName:x.entity.lName+"_"+x.oView.lName
+				lName:x.namespace+(x.namespace?"__":"")+"owners"
 			})
 		})};
 	function lookmlName(s){
@@ -409,15 +420,20 @@ var editor;
 		};	
 
 </script>
-<script type="text/x-dot-template" data-name="pre-attributes-data" data-out-to="#out1">
+<script type="text/x-dot-template" data-name="EAV Metadata Explore" data-out-to="#out1">
 	#######################################################################
-	# eav._<<:x.statView.lName>>.view.lkml 
+	##
+	##
+	##  <<:x.namespace>><<?x.namespace>>.<<?>>_stats.view.lkml 
+	##
+	##
 	#######################################################################
-	# Warning:  This file is programatically generated (Your changes will be overwritten)
-	# EAV Generator by Fabio http://rawgit.com/fabio-looker/eav-builder/master/index.html
-	# Generator v<<:x.generator.v>> (<<:x.generator.date>>)
-	# Generated on <<:(new Date()).toISOString().slice(0,10)>>
-	#
+	##  Warning:  This file is programatically generated (Your changes will be overwritten)
+	##  EAV Generator by Fabio http://rawgit.com/fabio-looker/eav-builder/master/index.html
+	##  Generator v<<:x.generator.v>> (<<:x.generator.date>>)
+	##  Generated on <<:(new Date()).toISOString().slice(0,10)>>
+	#######################################################################
+	include: "<<:x.namespace>><<?x.namespace>>.<<?>>_eav.view.lkml"
 	explore: <<:x.statView.lName>> {
 		# This lets us pull attribute metadata to easily fill out the rest of the form
 		hidden: yes
@@ -442,7 +458,7 @@ var editor;
 		join: <<:x.entity.lName>> {
 			type: left_outer
 			relationship: one_to_one
-			sql_on: ${<<:x.entity.lName>>.id}=${<<:x.entity.lName>>.id}=;;		
+			sql_on: ${<<:x.entity.lName>>.id}=${<<:x.entity.lName>>.id};;		
 		}
 		join: <<:x.oView.lName>> {
 			type: left_outer
@@ -452,7 +468,60 @@ var editor;
 		<<?>>
 		<<?>>
 	}
-	#This may already exist in your model, so you may want to add a prefix in the generator form
+	
+	
+	view: <<:x.statView.lName>> {
+		extends:[<<:x.eav.lName>>]
+		label: "EAV Table Stats"
+		measure: eav_count{
+			label: "Count of records"
+			type: count
+		}
+		measure: distinct_e_count {
+			#For each a, if count(*) > count(distinct e) then one-to-many
+			label: "Count of distict entities"
+			type: count_distinct
+			sql: ${TABLE}.<<:x.eav.eCol>>;;
+		}
+		measure: cardinality {
+			type: string
+			sql: CASE WHEN ${eav_count} > ${distinct_e_count} THEN 'one_to_many' ELSE 'one_to_one' END;;
+		}
+		measure: is_populated {
+			type: string
+			label: "Is value column populated?"
+			required_fields: [<<:x.colsView.lName>>.value_column]
+			sql: CASE<<* x.eav.values :value:v>>
+					 WHEN ${<<:x.colsView.lName>>.value_column}='v<<:v>>'
+					 THEN CASE 
+					 		WHEN COUNT(${TABLE}.<<:value.vCol>>)>0
+					 		THEN 'true'
+					 		ELSE 'false'
+							END
+					<<*>>
+			END;;
+		}
+	}	
+</script>
+<script type="text/x-dot-template" data-name="EAV Skeleton" data-out-to="#out1">
+	<<! let dialect={
+			redshift:{listAgg:'LISTAGG',concat:'||'}
+		}[x.dialect];
+	>>
+	#############################################################################################
+	##
+	##  <<:x.namespace>><<?x.namespace>>.<<?>>_eav.view.lkml 
+	##
+	##  <<?x.namespace>>Should be included into all other  <<:x.namespace>>.*.view.lkml files<<?>> 
+	##
+	#############################################################################################
+	##
+	##  Warning:  This file is programatically generated (Your changes will be overwritten)
+	##  EAV Generator by Fabio http://rawgit.com/fabio-looker/eav-builder/master/index.html
+	##  Generator v<<:x.generator.v>> (<<:x.generator.date>>)
+	##  Generated on <<:(new Date()).toISOString().slice(0,10)>>
+	##
+	#############################################################################################
 	view: <<:x.entity.lName>> {
 		label: "<<:x.entity.label>>"
 		dimension: id {
@@ -466,7 +535,7 @@ var editor;
 			sql: CAST(${TABLE}.<<:x.entity.eCol>> AS varchar);;
 		}
 		dimension: name {
-			primary_key: yes
+			type: string
 			sql: ${TABLE}.<<:x.entity.nCol>>;;
 		}
 		dimension: owner_id {
@@ -563,99 +632,6 @@ var editor;
 		}
 	}
 	
-	
-	view: <<:x.statView.lName>> {
-		extends:[<<:x.eav.lName>>]
-		label: "EAV Table Stats"
-		measure: eav_count{
-			label: "Count of records"
-			type: count
-		}
-		measure: distinct_e_count {
-			#For each a, if count(*) > count(distinct e) then one-to-many
-			label: "Count of distict entities"
-			type: count_distinct
-			sql: ${TABLE}.<<:x.eav.eCol>>;;
-		}
-		measure: cardinality {
-			type: string
-			sql: CASE WHEN ${eav_count} > ${distinct_e_count} THEN 'one_to_many' ELSE 'one_to_one' END;;
-		}
-		measure: is_populated {
-			type: string
-			label: "Is value column populated?"
-			required_fields: [<<:x.colsView.lName>>.value_column]
-			sql: CASE<<* x.eav.values :value:v>>
-					 WHEN ${<<:x.colsView.lName>>.value_column}='v<<:v>>'
-					 THEN CASE 
-					 		WHEN COUNT(${TABLE}.<<:value.vCol>>)>0
-					 		THEN 'true'
-					 		ELSE 'false'
-							END
-					<<*>>
-			END;;
-		}
-	}	
-</script>
-
-<script type="text/x-dot-template" data-name="one-per-model-explore-files">
-	<<! let dialect={
-			redshift:{listAgg:'LISTAGG',concat:'||'}
-		}[x.dialect];
-	>>
-	
-	<<* x.access :owner:o>>
-	#############################################################################################
-	##
-	##  eav.<<:lookmlName(owner.ownerName)>>.<<:x.entity.lName>>.view.lkml 
-	##
-	##  Should be included into model for: owner.ownerName
-	##
-	#############################################################################################
-	##
-	##  Warning:  This file is programatically generated (Your changes will be overwritten)
-	##  EAV Generator by Fabio http://rawgit.com/fabio-looker/eav-builder/master/index.html
-	##  Generator v<<:x.generator.v>> (<<:x.generator.date>>)
-	##  Generated on <<:(new Date()).toISOString().slice(0,10)>>
-	##
-	#############################################################################################
-
-	include: "eav._attributes.view.lkml" 
-
-	explore: <<:x.entity.lName>> {
-		<<? owner.ownerId >>
-		sql_always_where: ${<<:x.entity.lName>>.owner_id} = <<:owner.owner_id>>;;
-		<<?>>
-		
-		# Any other joins you may want can come before or after your EAV joins
-		<<* x.attributes :attribute:a >>
-			<<! let joinName=attribute.lName+"_"+(attribute.cardinality=="one_to_one"?"direct":"aggregates"); >>
-			join: <<:joinName>> {
-				relationship: one_to_one
-				view_label: "<<:attribute.viewLabel>>"
-				sql_on:
-					${<<:x.entity.lName>>.id} =
-					${<<:joinName>>.entity_id}
-				AND 
-					${<<:joinName>>.attribute} =
-					${<<:joinName>>.specific_attribute}
-				;;
-			}
-		<<*>>
-	}
-	<<*>>
-</script>
-	
-	
-<script type="text/x-dot-template" data-name="shared-attributes-views-file">
-	#######################################################################
-	# eav._attributes.view.lkml 
-	#######################################################################
-	# Warning:  This file is programatically generated (Your changes will be overwritten)
-	# EAV Generator by Fabio http://rawgit.com/fabio-looker/eav-builder/master/index.html
-	# Generator v<<:x.generator.v>> (<<:x.generator.date>>)
-	# Generated on <<:(new Date()).toISOString().slice(0,10)>>
-	#	
 	view: <<:x.eav.lName>>_base {
 		#Base view for all one_to_one and one_to_many EAV joins
 		extension:required
@@ -670,7 +646,7 @@ var editor;
 		}
 	}
 
-	<<* x.attribute.values :value:v>>
+	<<* x.eav.values :value:v>>
 	view: <<:x.eav.lName>>_v<<:v>>_direct {
 		extends: [<<:x.eav.lName>>_base]
 		extension:required
@@ -708,14 +684,70 @@ var editor;
 		}
 	}
 	<<*>>
+	
+</script>
 
+<script type="text/x-dot-template" data-name="Explore files (one per model/owner)">
+	<<* x.access :owner:o>>
+	<<!let modelSuffix = owner.ownerId ? "_"+lookmlName(o+"_"+owner.ownerName) : "" ; >>
+	#############################################################################################
+	##
+	##  <<:x.namespace>><<?x.namespace && modelSuffix>>.<<?>><<:modelSuffix>>.view.lkml 
+	##
+	##  Should be included into model for: owner.ownerName
+	##
+	#############################################################################################
+	##
+	##  Warning:  This file is programatically generated (Your changes will be overwritten)
+	##  EAV Generator by Fabio http://rawgit.com/fabio-looker/eav-builder/master/index.html
+	##  Generator v<<:x.generator.v>> (<<:x.generator.date>>)
+	##  Generated on <<:(new Date()).toISOString().slice(0,10)>>
+	##
+	#############################################################################################
+	
+	include: "<<:x.namespace>><<?x.namespace>>.<<?>>_eav.view.lkml"
+	explore: <<:x.entity.lName>><<:modelSuffix>> {
+		<<? owner.ownerId>>
+			<<?owner.ownerId.match(pat.digits)>>
+			sql_always_where: ${<<:x.entity.lName>>.owner_id} = <<:owner.ownerId>>;;
+			<<??>>
+			sql_always_where: ${<<:x.entity.lName>>.owner_id} = '<<:owner.ownerId>>';;
+			<<?>>
+		<<?>>
+		
+		# Any other joins you may want can come before or after your EAV joins
+		<<* x.attributes :attribute:a >>
+		<<?attribute.oCol == owner.ownerId || !attribute.oCol || !owner.ownerId>>
+			<<! let base = (attribute.cardinality=="one_to_one"?"_direct":"_aggregates");
+				let joinName = attribute.lName+base+modelSuffix; >>
+			join: <<:joinName>> {
+				relationship: one_to_one
+				view_label: "<<:attribute.viewLabel>>"
+				sql_on:
+					${<<:x.entity.lName>>.id} =
+					${<<:joinName>>.entity_id}
+				AND 
+					${<<:joinName>>.attribute} =
+					${<<:joinName>>.specific_attribute}
+				;;
+			}
+		<<?>>
+		<<*>>
+	}
 	<<*x.attributes :attribute:a >>
-	<<! let base=(attribute.cardinality=="one_to_one"?"direct":"aggregates"); >>
-	view: <<:attribute.lName>>_<<:base>> {
-		extends: [<<:x.eav.lName>>_<<:attribute.vNum>>_<<:base>>]
+	<<?attribute.oCol == owner.ownerId || !attribute.oCol || !owner.ownerId>>
+	<<! let base=(attribute.cardinality=="one_to_one"?"_direct":"_aggregates"); >>
+	view: <<:attribute.lName>><<:base>><<:modelSuffix>> {
+		extends: [<<:x.eav.lName>>_<<:attribute.vNum>><<:base>>]
 		dimension: specific_attribute {
 			hidden:yes
+			<<?attribute.attributeId.match(pat.digits)>>
+			type: number
 			sql: <<:attribute.attributeId>>;;
+			<<??>>
+			type: string
+			sql: '<<:attribute.attributeId>>';;
+			<<?>>
 		}
 		dimension: attribute_value {
 			label: "<<:attribute.fieldLabel>>"
@@ -724,6 +756,8 @@ var editor;
 			sql: ${value};;
 		}
 	}
+	<<?>>
+	<<*>>
 	<<*>>
 </script>
 </html>
