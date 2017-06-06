@@ -1,7 +1,7 @@
 <!doctype html >
 <html>
 <head>
-<script>var version={v:"0.x",date:"2017-05-31"}</script>
+<script>var version={v:"1.0.0",date:"2017-06-06"}</script>
 <title>LookML Builder</title>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.7.0/css/font-awesome.min.css" integrity="sha256-eZrrJcwDc/3uDhsdt61sL2oOBY362qM3lon1gyExkL0=" crossorigin="anonymous" />
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/foundation/5.5.3/css/foundation.min.css" integrity="sha256-NTds7atVCDeolLUzbcl45lx4gJYO+hNXCaX1wC2HQHc=" crossorigin="anonymous" />
@@ -21,6 +21,7 @@
  .d-f{display:flex}
 </style>
 <script>
+var templates={};
 var editor;
 	// Set the JSONEditor CSS theme and icon library globally
 	JSONEditor.defaults.theme = 'foundation5';
@@ -56,7 +57,6 @@ var editor;
 						append: true,
 						selfcontained: false
 					};	
-			var templates={}
 			$("script[type='text/x-dot-template']").each(function(i,el){
 					var t=this.dataset;
 					templates[t.name]=doT.template($(this).text())
@@ -174,7 +174,9 @@ var editor;
 				<div id="out1"></div>
 			</div>
 		</div>
+		<div class="wide">
 		<h2>Step 2) Pull attribute data from metadata explore</h2>
+		<div>
 		<form id="api-form">
 		<div class="wide d-f">
 			<div>
@@ -202,7 +204,7 @@ var editor;
 			<textarea id="api-out" readonly="readonly"></textarea>
 		</div>
 		<div class="wide">
-			<h2>Step 3) Build full model(s)</h2>
+			<h2>Step 3) Full model(s)</h2>
 			<div id="out"></div>
 		</div>
 	</div>
@@ -259,6 +261,7 @@ var editor;
 							?Object.entries(results.reduce(objByOf(x.oView.lName+'.id_string',x.oView.lName+'.name'),{}))
 							.filter(a=>a[0])
 							.map(a=>({ownerId:a[0],ownerName:a[1]||lookmlName(a[0])}))
+							.sort((a,b)=>a.ownerId>b.ownerId?1:a.ownerId<b.ownerId?-1:0)
 							:[]),
 					attributes:results.map((row,r)=>({
 							oId:row[x.oView.lName+'.id_string']||undefined,
@@ -270,7 +273,11 @@ var editor;
 							cardinality:row[x.statView.lName+'.cardinality']
 						}))
 				}))
-			.then(out=>$("#api-out").val(JSON.stringify(Object.assign({},editorValue,out),undefined,2)))
+			.then(out=>{
+					var merged=Object.assign({},editorValue,out);
+					$("#api-out").val(JSON.stringify(merged,undefined,2));
+					$("textarea[data-name=eavModels").val(templates.eavModels(customTransform(merged)).replace(/\n\s*\n/g,"\n"))
+				})
 			.catch(err=>{
 					$("#api-out").val(
 						"An error ocurred: "
@@ -302,30 +309,30 @@ var editor;
 							type:"object",
 							title:"Entity Table",
 							properties:{
-									label:{type:"string",title:"Entity Label"},
+									label:{type:"string",title:"Entity Label",pattern:pat.oneLineString},
 									lName:{type:"string",title:"LookML Name",pattern:pat.atom},
 									sTable:{type:"string",title:"SQL Table Expression",pattern:pat.sql},
-									eCol:{type:"string",title:"ID/entityID Column",pattern:pat.atom},
-									oCol:{type:"string",title:"Owner column",pattern:pat.atomOrNone}
+									eCol:{type:"string",title:"ID Column",pattern:pat.atom},
+									nCol:{type:"string",title:"Name Column",pattern:pat.atom},
+									oCol:{type:"string",title:"Owner column (optional)",pattern:pat.atomOrNone}
 								}
 						},
 					attribute:{
 							type: "object",
 							title:"Attribute Table",
 							properties:{
-									label:{type:"string",title:"Attribute Label"},
+									label:{type:"string",title:"Attribute Label",pattern:pat.oneLineString},
 									lName:{type:"string",title:"LookML Name",pattern:pat.atom},
 									sTable:{type:"string",title:"SQL Table Expression",pattern:pat.sql},
-									aCol:{type:"string",title:"ID/attributeID Column",pattern:pat.atom},
-									nCol:{type:"string",title:"Attribute Name Column",pattern:pat.atom},
-									oCol:{type:"string",title:"OwnerID Column",pattern:pat.atomOrNone}
+									aCol:{type:"string",title:"ID Column",pattern:pat.atom},
+									nCol:{type:"string",title:"Name Column",pattern:pat.atom},
+									oCol:{type:"string",title:"OwnerID Column (optional)",pattern:pat.atomOrNone}
 								}
 						},
 					eav:{
 						type: "object",
 						title: "EAV Table",
 						properties:{
-								//lName:{type:"string",title:"LookML Name"},
 								sTable:{ype:"string",title:"SQL Table Expression",pattern:pat.sql},
 								eCol:{type:"string","title":"Entity Column",pattern:pat.atom},
 								aCol:{type:"string","title":"Attribute Column",pattern:pat.atom},
@@ -375,7 +382,7 @@ var editor;
 									options:{disable_collapse:true},
 									properties:{
 											oId:{type:"string",title:"Owner ID", pattern:pat.oneLineStringOrNone},
-											aId:{type:"number",title:"Attribute ID", pattern:pat.oneLineString},
+											aId:{type:"string",title:"Attribute ID", pattern:pat.oneLineString},
 											vNum:{
 												type:"string",
 												watch:{vCols:"eav.values"},
@@ -420,7 +427,187 @@ var editor;
 		};	
 
 </script>
-<script type="text/x-dot-template" data-name="EAV Metadata Explore" data-out-to="#out1">
+<script type="text/x-dot-template" data-name="eavSkel" data-label="EAV Skeleton" data-out-to="#out1">
+	<<! let dialect={
+			redshift:{listAgg:'LISTAGG',concat:'||'}
+		}[x.dialect];
+	>>
+	#############################################################################################
+	##
+	##  <<:x.namespace>><<?x.namespace>>.<<?>>_eav.view.lkml 
+	##
+	##  <<?x.namespace>>Should be included into all other  <<:x.namespace>>.*.view.lkml files<<?>> 
+	##
+	#############################################################################################
+	##
+	##  Warning:  This file is programatically generated (Your changes will be overwritten)
+	##  EAV Generator by Fabio http://rawgit.com/fabio-looker/eav-builder/master/index.html
+	##  Generator v<<:x.generator.v>> (<<:x.generator.date>>)
+	##  Generated on <<:(new Date()).toISOString().slice(0,10)>>
+	##
+	#############################################################################################
+	view: <<:x.entity.lName>> {
+		label: "<<:x.entity.label>>"
+		sql_table_name: <<:x.entity.sTable>>;;
+		dimension: id {
+			hidden: yes
+			primary_key: yes
+			sql: ${TABLE}.<<:x.entity.eCol>>;;
+		}
+		dimension: id_string {
+			hidden: yes
+			type: string
+			sql: CAST(${TABLE}.<<:x.entity.eCol>> AS varchar);;
+		}
+		dimension: name {
+			type: string
+			sql: ${TABLE}.<<:x.entity.nCol>>;;
+		}
+		dimension: owner_id {
+			hidden: yes
+			sql: <<?x.entity.oCol>>${TABLE}.<<:x.entity.oCol>><<??>>NULL<<?>>;;
+		}
+	}
+	
+	
+	view: <<:x.attribute.lName>> {
+		sql_table_name: <<:x.attribute.sTable>>;;
+		dimension: id {
+				label: "<<:x.attribute.label>> ID"
+				primary_key: yes
+				sql: ${TABLE}.<<:x.attribute.aCol>>;;
+			}
+		dimension: id_string {
+				#Large numbers are not handled well by JSON.parse
+				hidden: yes
+				type:string
+				sql: CAST( ${TABLE}.<<:x.attribute.aCol>> AS varchar);;
+			}
+		dimension: name {
+			label: "<<:x.attribute.label>> Name"
+			sql: <<? x.attribute.nCol >>${TABLE}.<<:x.attribute.nCol>><<??>>${id_string}<<?>>;;
+		}
+		<<?x.attribute.oCol>>
+		dimension: owner_id {
+			hidden: yes
+			sql: ${TABLE}.<<:x.attribute.oCol>>;;
+		}
+		<<?>>
+	}
+	
+
+	view: <<:x.eav.lName>> {
+		sql_table_name: <<:x.eav.sTable>>;;
+		dimension: entity_id {
+			hidden: yes
+			sql: ${TABLE}.<<:x.eav.eCol>>;;
+		}
+		dimension: attribute_id {
+			hidden: yes
+			sql: ${TABLE}.<<:x.eav.aCol>>;;
+		}
+		<<* x.eav.values :value:v>>
+		dimension: v<<:v>> {
+			hidden:yes
+			sql: ${TABLE}.<<:value.vCol>>;;
+		}
+		<<*>>
+	}
+	
+	
+	<<?x.oView>>
+	view: <<:x.oView.lName>> {
+		sql_table_name: <<:x.oView.sTable>> ;;
+		dimension: id{
+			hidden: yes
+			primary_key: yes
+			sql: ${TABLE}.<<:x.oView.oCol>>;;
+			
+		}
+		dimension: id_string{
+			hidden: yes
+			type: string
+			sql: CAST(${TABLE}.<<:x.oView.oCol>> AS varchar);;
+		}
+		dimension: name{
+			label: "Owner"
+			view_label: <<?x.attribute.oCol>>"<<:x.attribute.label>>"<<??>>"<<:x.entity.label>>"<<?>>
+			type: string
+			sql: ${TABLE}.<<:x.oView.nCol>>;;
+		}
+	}	
+	<<?>>
+	
+	
+	view: <<:x.colsView.lName>> {
+		sql_table_name: (
+				<<* x.eav.values :value:v>>
+				<<?v!=0>>UNION ALL<<?>>
+				SELECT 'v<<:v>>' as vcol
+				<<*>>
+			)
+		;;
+		dimension: value_column {
+			type: string
+			sql: ${TABLE}.vcol ;;
+		}
+	}
+	
+	view: <<:x.eav.lName>>_base {
+		#Base view for all one_to_one and one_to_many EAV joins
+		extension:required
+
+		dimension: entity_id {
+			hidden: yes
+			sql: ${TABLE}.<<:x.eav.eCol>> ;;
+		}
+		dimension: attribute {
+			hidden: yes
+			sql: ${TABLE}.<<:x.eav.aCol>> ;;
+		}
+	}
+
+	<<* x.eav.values :value:v>>
+	view: <<:x.eav.lName>>_v<<:v>>_direct {
+		extends: [<<:x.eav.lName>>_base]
+		extension:required
+		sql_table_name: <<:x.eav.sTable>> ;;
+		dimension: value {
+			hidden: yes
+			type: string
+			sql: ${TABLE}.<<:value.vCol>> ;;
+		}
+	}
+	view: <<:x.eav.lName>>_v<<:v>>_aggregates {
+		extends: [<<:x.eav.lName>>_base]
+		extension: required
+		sql_table_name: (
+			SELECT <<:x.eav.eCol>>, <<:x.eav.aCol>>, <<:dialect.listAgg>>(<<:value.vCol>>,', ') as value_list, COUNT(<<:value.vCol>>) as value_count
+			FROM <<:x.eav.sTable>>
+			GROUP BY 1,2
+			)
+		;;
+		#dimension: id {
+		#	hidden:  yes
+		#	primary_key: yes
+		#	type: string
+		#	sql: CONCAT(${TABLE}.case_id, '|' , ${TABLE}.attribute);;
+		#}
+		dimension: value_list {
+			hidden:  yes
+			type: string
+			sql: ${TABLE}.value_list ;;
+		}
+		dimension: value_count {
+			hidden:  yes
+			type: number
+			sql: ${TABLE}.value_count ;;
+		}
+	}
+	<<*>>
+	
+</script>
+<script type="text/x-dot-template" data-label="EAV Metadata Explore" data-name="eavStats" data-out-to="#out1">
 	#######################################################################
 	##
 	##
@@ -503,196 +690,13 @@ var editor;
 		}
 	}	
 </script>
-<script type="text/x-dot-template" data-name="EAV Skeleton" data-out-to="#out1">
-	<<! let dialect={
-			redshift:{listAgg:'LISTAGG',concat:'||'}
-		}[x.dialect];
-	>>
-	#############################################################################################
-	##
-	##  <<:x.namespace>><<?x.namespace>>.<<?>>_eav.view.lkml 
-	##
-	##  <<?x.namespace>>Should be included into all other  <<:x.namespace>>.*.view.lkml files<<?>> 
-	##
-	#############################################################################################
-	##
-	##  Warning:  This file is programatically generated (Your changes will be overwritten)
-	##  EAV Generator by Fabio http://rawgit.com/fabio-looker/eav-builder/master/index.html
-	##  Generator v<<:x.generator.v>> (<<:x.generator.date>>)
-	##  Generated on <<:(new Date()).toISOString().slice(0,10)>>
-	##
-	#############################################################################################
-	view: <<:x.entity.lName>> {
-		label: "<<:x.entity.label>>"
-		dimension: id {
-			hidden: yes
-			primary_key: yes
-			sql: ${TABLE}.<<:x.entity.eCol>>;;
-		}
-		dimension: id_string {
-			hidden: yes
-			type: string
-			sql: CAST(${TABLE}.<<:x.entity.eCol>> AS varchar);;
-		}
-		dimension: name {
-			type: string
-			sql: ${TABLE}.<<:x.entity.nCol>>;;
-		}
-		dimension: owner_id {
-			alias:[<<:x.oView.lName>>_id]
-			hidden: yes
-			sql: <<?x.entity.oCol>>${TABLE}.<<:x.entity.oCol>><<??>>NULL<<?>>;;
-		}
-	}
-	
-	
-	view: <<:x.attribute.lName>> {
-		sql_table_name: <<:x.attribute.sTable>>;;
-		dimension: id {
-				label: "<<:x.attribute.label>> ID"
-				primary_key: yes
-				sql: ${TABLE}.<<:x.attribute.aCol>>;;
-			}
-		dimension: id_string {
-				#Large numbers are not handled well by JSON.parse
-				hidden: yes
-				type:string
-				sql: CAST( ${TABLE}.<<:x.attribute.aCol>> AS varchar);;
-			}
-		dimension: name {
-			label: "<<:x.attribute.label>> Name"
-			sql: <<? x.attribute.nCol >>${TABLE}.<<:x.attribute.nCol>><<??>>${id_string}<<?>>;;
-		}
-		<<?x.attribute.oCol>>
-		dimension: owner_id {
-			alias: [<<:x.oView.lName>>_id]
-			hidden: yes
-			sql: ${TABLE}.<<:x.attribute.oCol>>;;
-		}
-		<<?>>
-	}
-	
 
-	view: <<:x.eav.lName>> {
-		sql_table_name: <<:x.eav.sTable>>;;
-		dimension: entity_id {
-			alias: [<<:x.entity.lName>>_id]
-			hidden: yes
-			sql: ${TABLE}.<<:x.eav.eCol>>;;
-		}
-		dimension: attribute_id {
-			alias: [<<:x.attribute.lName>>_id]
-			hidden: yes
-			sql: ${TABLE}.<<:x.eav.aCol>>;;
-		}
-		<<* x.eav.values :value:v>>
-		dimension: v<<:v>> {
-			hidden:yes
-			sql: ${TABLE}.<<:value.vCol>>;;
-		}
-		<<*>>
-	}
-	
-	
-	<<?x.oView>>
-	view: <<:x.oView.lName>> {
-		sql_table_name: <<:x.oView.sTable>> ;;
-		dimension: id{
-			hidden: yes
-			primary_key: yes
-			sql: ${TABLE}.<<:x.oView.oCol>>;;
-			
-		}
-		dimension: id_string{
-			hidden: yes
-			type: string
-			sql: CAST(${TABLE}.<<:x.oView.oCol>> AS varchar);;
-		}
-		dimension: name{
-			label: "Owner"
-			view_label: <<?x.attribute.oCol>>"<<:x.attribute.label>>"<<??>>"<<:x.entity.label>>"<<?>>
-			type: string
-			sql: ${TABLE}.<<:x.oView.nCol>>;;
-		}
-	}	
-	<<?>>
-	
-	
-	view: <<:x.colsView.lName>> {
-		sql_table_name: (
-				<<* x.eav.values :value:v>>
-				<<?v!=0>>UNION ALL<<?>>
-				SELECT 'v<<:v>>' as vcol
-				<<*>>
-			)
-		;;
-		dimension: value_column {
-			type: string
-			sql: ${TABLE}.vcol ;;
-		}
-	}
-	
-	view: <<:x.eav.lName>>_base {
-		#Base view for all one_to_one and one_to_many EAV joins
-		extension:required
-
-		dimension: entity_id {
-			hidden: yes
-			sql: ${TABLE}.<<:x.eav.eCol>> ;;
-		}
-		dimension: attribute {
-			hidden: yes
-			sql: ${TABLE}.<<:x.eav.aCol>> ;;
-		}
-	}
-
-	<<* x.eav.values :value:v>>
-	view: <<:x.eav.lName>>_v<<:v>>_direct {
-		extends: [<<:x.eav.lName>>_base]
-		extension:required
-		sql_table_name: <<:x.attribute.sName>> ;;
-		dimension: value {
-			hidden: yes
-			type: string
-			sql: ${TABLE}.<<:value.vCol>> ;;
-		}
-	}
-	view: <<:x.eav.lName>>_v<<:v>>_aggregates {
-		extends: [<<:x.eav.lName>>_base]
-		extension: required
-		sql_table_name: (
-			SELECT <<:x.eav.eCol>>, <<:x.eav.aCol>>, <<:dialect.listAgg>>(${value}) as value_list, COUNT(${value}) as value_count
-			FROM <<:x.eav.sTable>>
-			GROUP BY 1,2
-			)
-		;;
-		#dimension: id {
-		#	hidden:  yes
-		#	primary_key: yes
-		#	type: string
-		#	sql: CONCAT(${TABLE}.case_id, '|' , ${TABLE}.attribute);;
-		#}
-		dimension: value_list {
-			hidden:  yes
-			type: string
-			sql: ${TABLE}.value_list ;;
-		}
-		dimension: value_count {
-			hidden:  yes
-			type: number
-			sql: ${TABLE}.value_count ;;
-		}
-	}
-	<<*>>
-	
-</script>
-
-<script type="text/x-dot-template" data-name="Explore files (one per model/owner)">
+<script type="text/x-dot-template" data-label="Explore files (one per model/owner)" data-name="eavModels">
 	<<* x.access :owner:o>>
-	<<!let modelSuffix = owner.ownerId ? "_"+lookmlName(o+"_"+owner.ownerName) : "" ; >>
+	<<!let modelSuffix = lookmlName(o+"_"+owner.ownerName); >>
 	#############################################################################################
 	##
-	##  <<:x.namespace>><<?x.namespace && modelSuffix>>.<<?>><<:modelSuffix>>.view.lkml 
+	##  <<:x.namespace>><<?x.namespace>>.<<?>><<:modelSuffix>>.view.lkml 
 	##
 	##  Should be included into model for: owner.ownerName
 	##
@@ -706,25 +710,26 @@ var editor;
 	#############################################################################################
 	
 	include: "<<:x.namespace>><<?x.namespace>>.<<?>>_eav.view.lkml"
-	explore: <<:x.entity.lName>><<:modelSuffix>> {
+	<<!let exploreName=x.entity.lName+"_"+modelSuffix;>>
+	explore: <<:exploreName>> {
+		from: <<:x.entity.lName>>
 		<<? owner.ownerId>>
 			<<?owner.ownerId.match(pat.digits)>>
-			sql_always_where: ${<<:x.entity.lName>>.owner_id} = <<:owner.ownerId>>;;
+			sql_always_where: ${<<:exploreName>>.owner_id} = <<:owner.ownerId>>;;
 			<<??>>
-			sql_always_where: ${<<:x.entity.lName>>.owner_id} = '<<:owner.ownerId>>';;
+			sql_always_where: ${<<:exploreName>>.owner_id} = '<<:owner.ownerId>>';;
 			<<?>>
 		<<?>>
 		
 		# Any other joins you may want can come before or after your EAV joins
 		<<* x.attributes :attribute:a >>
-		<<?attribute.oCol == owner.ownerId || !attribute.oCol || !owner.ownerId>>
-			<<! let base = (attribute.cardinality=="one_to_one"?"_direct":"_aggregates");
-				let joinName = attribute.lName+base+modelSuffix; >>
+		<<?attribute.oId == owner.ownerId || !attribute.oId || !owner.ownerId>>
+			<<! let joinName = attribute.lName+"_"+modelSuffix; >>
 			join: <<:joinName>> {
 				relationship: one_to_one
 				view_label: "<<:attribute.viewLabel>>"
 				sql_on:
-					${<<:x.entity.lName>>.id} =
+					${<<:exploreName>>.id} =
 					${<<:joinName>>.entity_id}
 				AND 
 					${<<:joinName>>.attribute} =
@@ -735,25 +740,26 @@ var editor;
 		<<*>>
 	}
 	<<*x.attributes :attribute:a >>
-	<<?attribute.oCol == owner.ownerId || !attribute.oCol || !owner.ownerId>>
-	<<! let base=(attribute.cardinality=="one_to_one"?"_direct":"_aggregates"); >>
-	view: <<:attribute.lName>><<:base>><<:modelSuffix>> {
-		extends: [<<:x.eav.lName>>_<<:attribute.vNum>><<:base>>]
+	<<?attribute.oId == owner.ownerId || !attribute.oId || !owner.ownerId>>
+	<<! let base=(attribute.cardinality=="one_to_one"?"direct":"aggregates"); >>
+	view: <<:attribute.lName>>_<<:modelSuffix>> {
+		extends: [<<:x.eav.lName>>_<<:attribute.vNum>>_<<:base>>]
 		dimension: specific_attribute {
 			hidden:yes
-			<<?attribute.attributeId.match(pat.digits)>>
+			<<?attribute.aId.match(pat.digits)>>
 			type: number
-			sql: <<:attribute.attributeId>>;;
+			sql: <<:attribute.aId>>;;
 			<<??>>
 			type: string
-			sql: '<<:attribute.attributeId>>';;
+			sql: '<<:attribute.aId>>';;
 			<<?>>
 		}
 		dimension: attribute_value {
 			label: "<<:attribute.fieldLabel>>"
 			view_label: "<<:attribute.viewLabel>>"
 			#type: Could be added
-			sql: ${value};;
+			<<?attribute.cardinality=="one_to_one">> sql: ${value};;<<?>>
+			<<?attribute.cardinality=="one_to_many">>sql: ${value_list};;<<?>>
 		}
 	}
 	<<?>>
