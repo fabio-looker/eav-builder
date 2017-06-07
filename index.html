@@ -201,6 +201,7 @@ var editor;
 		</div>
 		</form>
 		<div class="wide">
+			<div id="api-alternate"></div>
 			<textarea id="api-out" readonly="readonly"></textarea>
 		</div>
 		<div class="wide">
@@ -221,23 +222,7 @@ var editor;
 			try{
 					var editorValue=editor.getValue()
 					var x=customTransform(editorValue)
-					var filters={};
-					filters[x.statView.lName+".is_populated"]='true'
-				}catch(e){alert("Missing editor value. "+e.getMessage())}
-			Promise.resolve()
-			.then(()=>$("#api-out").val("Fetching..."))
-			.then(()=>$.post("http://localhost:1337/"+hostname+"/login",{
-					client_id:key,
-					client_secret:secret,
-				}))
-			.then(auth=>((verb,method,data)=>$.ajax({
-					method: verb,
-					url:"http://localhost:1337/"+hostname+"/api/3.0/"+method,
-					data:verb=="POST"?JSON.stringify(data):data,
-					headers:{"Authorization":"token "+auth.access_token}
-				})))
-			.then(api=>
-					api("POST","queries/run/json",{
+					var query={
 							model:model,
 							view:x.statView.lName,
 							fields:(
@@ -252,9 +237,33 @@ var editor;
 									x.colsView.lName+'.value_column',
 									x.statView.lName+'.cardinality'
 								]),
-							filters:filters,
+							filters:{},
 							limit:10000
-						})
+						}
+					query.filters[x.statView.lName+".is_populated"]='true';
+				}catch(e){alert("Missing editor value. "+(e.message||e))}
+
+			Promise.resolve()
+			.then(()=>$("#api-out").val("Fetching..."))
+			.then(()=>$("#api-alternate").text(
+				"https://"+host
+				+"/explore/"+model+"/"+query.view
+				+"?fields="+query.fields.join(",")
+				+Object.keys(query.filters).map(f=>"&f["+f+"]="+encodeURIComponent(query.filters[f])).join("")
+				+"&limit="+query.limit
+			))
+			.then(()=>$.post("http://localhost:1337/"+hostname+"/login",{
+					client_id:key,
+					client_secret:secret,
+				}))
+			.then(auth=>((verb,method,data)=>$.ajax({
+					method: verb,
+					url:"http://localhost:1337/"+hostname+"/api/3.0/"+method,
+					data:verb=="POST"?JSON.stringify(data):data,
+					headers:{"Authorization":"token "+auth.access_token}
+				})))
+			.then(api=>
+					api("POST","queries/run/json",query)
 				)
 			.then(results=>({
 					access: (x.oView
@@ -262,7 +271,7 @@ var editor;
 							.filter(a=>a[0])
 							.map(a=>({ownerId:a[0],ownerName:a[1]||lookmlName(a[0])}))
 							.sort((a,b)=>a.ownerId>b.ownerId?1:a.ownerId<b.ownerId?-1:0)
-							:[]),
+							:[{ownerId:0,ownerName:"All"}]),
 					attributes:results.map((row,r)=>({
 							oId:row[x.oView.lName+'.id_string']||undefined,
 							aId:row[x.attribute.lName+'.id_string'],
@@ -303,7 +312,7 @@ var editor;
 			title:"Builder Inputs",
 			options:{"disable_edit_json":false,"disable_collapse":true,"disable_properties":false},
 			properties:{
-					dialect:{type:"string",title:"Dialect",enum:["redshift"]},
+					dialect:{type:"string",title:"Dialect",enum:["redshift","postgres"]},
 					namespace:{type:"string",title:"LookML namespace",pattern:pat.atomOrNone},
 					entity:{
 							type:"object",
@@ -333,7 +342,7 @@ var editor;
 						type: "object",
 						title: "EAV Table",
 						properties:{
-								sTable:{ype:"string",title:"SQL Table Expression",pattern:pat.sql},
+								sTable:{type:"string",title:"SQL Table Expression",pattern:pat.sql},
 								eCol:{type:"string","title":"Entity Column",pattern:pat.atom},
 								aCol:{type:"string","title":"Attribute Column",pattern:pat.atom},
 								values:{type:"array",format:"table",title:"Values",
@@ -352,7 +361,7 @@ var editor;
 							options:{collapsed:true},
 							properties:{
 									lName:{type:"string",title:"LookML Name",pattern:pat.atomOrNone},
-									sTable:{ype:"string",title:"SQL Table Expression",pattern:pat.sqlOrNone},
+									sTable:{type:"string",title:"SQL Table Expression",pattern:pat.sqlOrNone},
 									oCol:{type:"string",title:"OwnerID Column",pattern:pat.atomOrNone},
 									nCol:{type:"string",title:"Owner Name Column",pattern:pat.atomOrNone},
 								}
@@ -429,7 +438,8 @@ var editor;
 </script>
 <script type="text/x-dot-template" data-name="eavSkel" data-label="EAV Skeleton" data-out-to="#out1">
 	<<! let dialect={
-			redshift:{listAgg:'LISTAGG',concat:'||'}
+			redshift:{listAgg:'LISTAGG',concat:'||'},
+			postgres:{listAgg:'string_agg',concat:'||'}
 		}[x.dialect];
 	>>
 	#############################################################################################
@@ -543,7 +553,7 @@ var editor;
 		sql_table_name: (
 				<<* x.eav.values :value:v>>
 				<<?v!=0>>UNION ALL<<?>>
-				SELECT 'v<<:v>>' as vcol
+				SELECT CAST('v<<:v>>' as varchar(5)) as vcol
 				<<*>>
 			)
 		;;
@@ -713,6 +723,7 @@ var editor;
 	<<!let exploreName=x.entity.lName+"_"+modelSuffix;>>
 	explore: <<:exploreName>> {
 		from: <<:x.entity.lName>>
+		label: "<<:x.entity.label>>"
 		<<? owner.ownerId>>
 			<<?owner.ownerId.match(pat.digits)>>
 			sql_always_where: ${<<:exploreName>>.owner_id} = <<:owner.ownerId>>;;
@@ -746,7 +757,7 @@ var editor;
 		extends: [<<:x.eav.lName>>_<<:attribute.vNum>>_<<:base>>]
 		dimension: specific_attribute {
 			hidden:yes
-			<<?attribute.aId.match(pat.digits)>>
+			<<?attribute.aId && attribute.aId.match(pat.digits)>>
 			type: number
 			sql: <<:attribute.aId>>;;
 			<<??>>
