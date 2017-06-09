@@ -1,7 +1,7 @@
 <!doctype html >
 <html>
 <head>
-<script>var version={v:"1.0.1",date:"2017-06-07"}</script>
+<script>var version={v:"1.0.2",date:"2017-06-09"}</script>
 <title>LookML Builder</title>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.7.0/css/font-awesome.min.css" integrity="sha256-eZrrJcwDc/3uDhsdt61sL2oOBY362qM3lon1gyExkL0=" crossorigin="anonymous" />
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/foundation/5.5.3/css/foundation.min.css" integrity="sha256-NTds7atVCDeolLUzbcl45lx4gJYO+hNXCaX1wC2HQHc=" crossorigin="anonymous" />
@@ -21,12 +21,13 @@
  .d-f{display:flex}
 </style>
 <script>
-var templates={};
-var editor;
+	var templates={};
+	var editor;
 	// Set the JSONEditor CSS theme and icon library globally
 	JSONEditor.defaults.theme = 'foundation5';
 	JSONEditor.defaults.iconlib = 'fontawesome4';
 	$(document).ready(()=>{
+			$("#version").text("v"+version.v+" ("+version.date+")")
 			var editorDef= {
 					schema: inputSchema,
 					startval: tryJSONParse(qs("o")) || tryJSONParse(localStorage.getItem(storageKey)) || initialValue,
@@ -149,6 +150,7 @@ var editor;
 </script>
 </head>
 <body>
+	<div id="version" style="position:absolute;top:0;right:1em;color:#DDD;font-size:0.8em"></div>
 	<h1>LookML Builder</h2>
 	<div>
 		<div id="build-panel" style="width:80vw;min-width:640px;margin:0 auto">
