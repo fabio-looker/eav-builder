@@ -1,7 +1,7 @@
 <!doctype html >
 <html>
 <head>
-<script>var version={v:"1.0.2",date:"2017-06-09"}</script>
+<script>var version={v:"1.0.3",date:"2017-06-09"}</script>
 <title>LookML Builder</title>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.7.0/css/font-awesome.min.css" integrity="sha256-eZrrJcwDc/3uDhsdt61sL2oOBY362qM3lon1gyExkL0=" crossorigin="anonymous" />
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/foundation/5.5.3/css/foundation.min.css" integrity="sha256-NTds7atVCDeolLUzbcl45lx4gJYO+hNXCaX1wC2HQHc=" crossorigin="anonymous" />
@@ -151,19 +151,7 @@
 </head>
 <body>
 	<div id="version" style="position:absolute;top:0;right:1em;color:#DDD;font-size:0.8em"></div>
-	<h1>LookML Builder</h2>
-	<div>
-		<div id="build-panel" style="width:80vw;min-width:640px;margin:0 auto">
-			<form id="build-form">
-				<div id="json-editor"></div>
-				<div id="msg" style="white-space:pre-line;color:#333;background-color:#DDB"></div>
-				<div style="text-align:right">
-					<div  style="display:inline-block;vertical-align:top;margin: 0 2em;">
-						<input type="submit" style="margin-left:auto;margin-right:auto;border:solid 1px black" value="Go" class="button" />
-					</div>
-				</div>
-			</form>
-		</div>
+	<h1>EAV LookML Builder</h2>
 		<div class="narrow">
 			<h2>Tips</h2>
 			<ul style="font-size:0.8em; font-family:serif; color:#333;">
@@ -172,9 +160,21 @@
 		</div>	
 		<div class="wide">
 			<div style="width:80vw;min-width:640px;margin:0 auto">
-				<h2>Step 1) Build metadata explore</h2>
+				<h2>Step 1) Build EAV metadata explore</h2>
 				<div id="out1"></div>
 			</div>
+		</div>
+	<div>
+		<div id="build-panel" style="width:80vw;min-width:640px;margin:0 auto">
+			<form id="build-form">
+				<div id="json-editor"></div>
+				<div id="msg" style="white-space:pre-line;color:#333;background-color:#DDB"></div>
+				<div style="text-align:right">
+					<div  style="display:inline-block;vertical-align:top;margin: 0 2em;">
+						<input type="submit" style="margin-left:auto;margin-right:auto;border:solid 1px black" value="Build" class="button" />
+					</div>
+				</div>
+			</form>
 		</div>
 		<div class="wide">
 		<h2>Step 2) Pull attribute data from metadata explore</h2>
@@ -198,7 +198,7 @@
 				<input id="api-secret" type="password"/>
 			</div>
 			<div>
-				<input type="submit" value="Go" id="api-submit" />
+				<input type="submit" value="Pull" id="api-submit" class="button" style="margin-left:2em;margin-right:2em;margin-top:1em;border:solid 1px black" />
 			</div>
 		</div>
 		</form>
