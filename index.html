@@ -258,7 +258,7 @@
 				+Object.keys(query.filters).map(f=>"&f["+f+"]="+encodeURIComponent(query.filters[f])).join("")
 				+"&limit="+query.limit
 			))
-			.then(()=>$.post("http://localhost:1337/"+hostname+"/login",{
+			.then(()=>$.post("http://localhost:1337/"+hostname+"/api/3.1/login",{
 					client_id:key,
 					client_secret:secret,
 				}))
