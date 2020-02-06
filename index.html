@@ -264,7 +264,7 @@
 				}))
 			.then(auth=>((verb,method,data)=>$.ajax({
 					method: verb,
-					url:"http://localhost:1337/"+hostname+"/api/3.0/"+method,
+					url:"http://localhost:1337/"+hostname+"/api/3.1/"+method,
 					data:verb=="POST"?JSON.stringify(data):data,
 					headers:{"Authorization":"token "+auth.access_token}
 				})))
